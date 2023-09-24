@@ -1,3 +1,11 @@
+Update to use Bleak Lib:
+
+ - clone git
+ - pip  install pycryptodome 
+ - pip install bleak
+
+---------------------
+
 Python package to control Awox mesh light bulbs.
 
 API inspired by [Matthew Garrett](https://github.com/mjg59)'s python light bulb 
