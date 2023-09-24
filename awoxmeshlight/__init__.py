@@ -256,7 +256,8 @@ class AwoxMeshLight:
 
         try:
             logger.info ("[%s] Writing command %i data %s", self.mac, command, repr (data))
-            self.command_char.write(packet)
+            #self.command_char.write(packet)
+            await self.btdevice.write_gatt_char(COMMAND_CHAR_UUID, packet, True)
         except:
             logger.info('[%s] (Re)load characteristics', self.mac)
             #self.command_char = self.btdevice.getCharacteristics(uuid=COMMAND_CHAR_UUID)[0]
@@ -372,7 +373,8 @@ class AwoxMeshLight:
 
     async def disconnect (self):
         logger.info ("Disconnecting.")
-        await self.btdevice.disconnect ()
+        state = await self.btdevice.disconnect ()
+        logger.info ("Disconnected.")
         self.session_key = None
 
     async def getFirmwareRevision (self):
