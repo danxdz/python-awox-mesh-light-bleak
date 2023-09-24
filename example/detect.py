@@ -4,6 +4,7 @@
 
 ''' Example '''
 
+import asyncio
 import os
 import sys
 
@@ -13,11 +14,16 @@ sys.path.append(LIB_PATH)
 
 from awoxmeshlight import AwoxMeshLight
 
-MAC = os.getenv('MAC') or "A4:C1:38:FF:FF:FF"
-print("info: Looking up mac=%s" % MAC)
-LIGHT = AwoxMeshLight(MAC)
-LIGHT.connect()
-print("info: model=%s" % LIGHT.getModelNumber())
-print("info: hardware=%s" % LIGHT.getHardwareRevision())
-print("info: firmware=%s" % LIGHT.getFirmwareRevision())
-LIGHT.disconnect()
+async def main():
+
+    MAC = os.getenv('MAC') or "A4:C1:38:77:2A:18"
+    print("info: Looking up mac=%s" % MAC)
+    LIGHT = AwoxMeshLight(MAC,"F8GwIEDa","31617080")
+    await LIGHT.connect()
+    print("info: model=%s" % await LIGHT.getModelNumber())
+    print("info: hardware=%s" % await LIGHT.getHardwareRevision())
+    print("info: firmware=%s" % await LIGHT.getFirmwareRevision())
+    await LIGHT.disconnect()
+
+
+asyncio.run(main())

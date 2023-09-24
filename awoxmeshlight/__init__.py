@@ -3,10 +3,16 @@ from __future__ import unicode_literals
 from . import packetutils as pckt
 
 from os import urandom
-from bluepy import btle
+#from bluepy import btle
+
 import logging
 import struct
 import time
+
+
+from bleak import BleakScanner
+from bleak import BleakClient
+from bleak.backends.characteristic import BleakGATTCharacteristic
 
 # Commands :
 
@@ -66,10 +72,10 @@ OTA_CHAR_UUID = '00010203-0405-0607-0809-0a0b0c0d1913'
 
 logger = logging.getLogger (__name__)
 
-class Delegate(btle.DefaultDelegate):
+class Delegate(BleakClient):
     def __init__(self, light):
         self.light = light
-        btle.DefaultDelegate.__init__(self)
+        #btle.DefaultDelegate.__init__(self)
 
     def handleNotification(self, cHandle, data):
         char = self.light.btdevice.getCharacteristics (cHandle)[0]
@@ -93,7 +99,7 @@ class AwoxMeshLight:
         """
         self.mac = mac
         self.mesh_id = 0
-        self.btdevice = btle.Peripheral ()
+        self.btdevice = BleakClient(mac)
         self.session_key = None
         self.command_char = None
         self.mesh_name = mesh_name.encode ()
@@ -109,7 +115,7 @@ class AwoxMeshLight:
         self.mode = None
         self.status = None
 
-    def connect(self, mesh_name = None, mesh_password = None):
+    async def connect(self, mesh_name = None, mesh_password = None):
         """
         Args :
             mesh_name: The mesh name as a string.
@@ -118,20 +124,26 @@ class AwoxMeshLight:
         if mesh_name : self.mesh_name = mesh_name.encode ()
         if mesh_password : self.mesh_password = mesh_password.encode ()
 
+        print("mesh_name: ", self.mesh_name)
+        print("mesh_password: ", self.mesh_password)
+
         assert len(self.mesh_name) <= 16, "mesh_name can hold max 16 bytes"
         assert len(self.mesh_password) <= 16, "mesh_password can hold max 16 bytes"
 
-        self.btdevice.connect (self.mac)
-        self.btdevice.setDelegate (Delegate (self))
-        pair_char = self.btdevice.getCharacteristics (uuid = PAIR_CHAR_UUID)[0]
+        await self.btdevice.connect ()
+        #self.btdevice.setDelegate (Delegate (self))
+        #pair_char = self.btdevice.get_services (uuid = PAIR_CHAR_UUID)[0]
+
         self.session_random = urandom(8)
         message = pckt.make_pair_packet (self.mesh_name, self.mesh_password, self.session_random)
-        pair_char.write (message)
+        await self.btdevice.write_gatt_char(PAIR_CHAR_UUID, message, True)
 
-        status_char = self.btdevice.getCharacteristics (uuid = STATUS_CHAR_UUID)[0]
-        status_char.write (b'\x01')
+        status_char = await self.btdevice.read_gatt_char(STATUS_CHAR_UUID)
+        #status_char.write (b'\x01')
+        await  self.btdevice.write_gatt_char(STATUS_CHAR_UUID, b'\x01', True)
 
-        reply = bytearray (pair_char.read ())
+        reply = bytearray ( await self.btdevice.read_gatt_char (PAIR_CHAR_UUID))
+        print("reply: ", reply)
         if reply[0] == 0xd :
             self.session_key = pckt.make_session_key (self.mesh_name, self.mesh_password, \
                 self.session_random, reply[1:9])
@@ -142,7 +154,7 @@ class AwoxMeshLight:
                 logger.info ("Auth error : check name and password.")
             else :
                 logger.info ("Unexpected pair value : %s", repr (reply))
-            self.disconnect ()
+            await self.disconnect ()
             return False
 
     def connectWithRetry(self, num_tries = 1, mesh_name = None, mesh_password = None):
@@ -157,8 +169,8 @@ class AwoxMeshLight:
         while (not connected and attempts < num_tries ):
             try:
                 connected = self.connect(mesh_name, mesh_password)
-            except btle.BTLEDisconnectError:
-                logger.info("connection_error: retrying for %s time", attempts)
+            except Exception as e:
+                logger.info("connection_error: retrying for %s time", attempts , e)
             finally:
                 attempts += 1
 
@@ -226,7 +238,7 @@ class AwoxMeshLight:
         self.writeCommand (C_MESH_ADDRESS, data)
         self.mesh_id = mesh_id
 
-    def writeCommand (self, command, data, dest = None):
+    async def writeCommand (self, command, data, dest = None):
         """
         Args:
             command: The command, as a number.
@@ -239,16 +251,19 @@ class AwoxMeshLight:
         packet = pckt.make_command_packet (self.session_key, self.mac, dest, command, data)
 
         if not self.command_char:
-            self.command_char = self.btdevice.getCharacteristics (uuid=COMMAND_CHAR_UUID)[0]
+            #self.command_char = self.btdevice.getCharacteristics (uuid=COMMAND_CHAR_UUID)[0]
+            self.command_char = await self.btdevice.read_gatt_char(COMMAND_CHAR_UUID)
 
         try:
             logger.info ("[%s] Writing command %i data %s", self.mac, command, repr (data))
             self.command_char.write(packet)
         except:
             logger.info('[%s] (Re)load characteristics', self.mac)
-            self.command_char = self.btdevice.getCharacteristics(uuid=COMMAND_CHAR_UUID)[0]
+            #self.command_char = self.btdevice.getCharacteristics(uuid=COMMAND_CHAR_UUID)[0]
+            self.command_char = await  self.btdevice.read_gatt_char(COMMAND_CHAR_UUID)
             logger.info ("[%s] Writing command %i data %s", self.mac, command, repr (data))
-            self.command_char.write(packet)
+            #self.command_char.write(packet)
+            await self.btdevice.write_gatt_char(COMMAND_CHAR_UUID, packet, True)
 
     def resetMesh (self):
         """
@@ -334,57 +349,58 @@ class AwoxMeshLight:
         data = struct.pack('B', brightness)
         self.writeCommand(C_WHITE_TEMPERATURE, data)
 
-    def setWhite (self, temp, brightness):
+    async def setWhite (self, temp, brightness):
         """
         Args :
             temp: between 0 and 0x7f
             brightness: between 1 and 0x7f
         """
         data = struct.pack ('B', temp)
-        self.writeCommand (C_WHITE_TEMPERATURE, data)
+        await self.writeCommand (C_WHITE_TEMPERATURE, data)
         data = struct.pack ('B', brightness)
-        self.writeCommand (C_WHITE_BRIGHTNESS, data)
+        await self.writeCommand (C_WHITE_BRIGHTNESS, data)
 
-    def on (self):
+    async def on (self):
         """ Turns the light on.
         """
-        self.writeCommand (C_POWER, b'\x01')
+        await self.writeCommand (C_POWER, b'\x01')
 
-    def off (self):
+    async def off (self):
         """ Turns the light off.
         """
-        self.writeCommand (C_POWER, b'\x00')
+        await self.writeCommand (C_POWER, b'\x00')
 
-    def disconnect (self):
+    async def disconnect (self):
         logger.info ("Disconnecting.")
-        self.btdevice.disconnect ()
+        await self.btdevice.disconnect ()
         self.session_key = None
 
-    def getFirmwareRevision (self):
+    async def getFirmwareRevision (self):
         """
         Returns :
             The firmware version as a null terminated utf-8 string.
         """
-        char = self.btdevice.getCharacteristics (uuid=btle.AssignedNumbers.firmwareRevisionString)[0]
-        return char.read ()
+        char = await self.btdevice.read_gatt_char("00002a26-0000-1000-8000-00805f9b34fb")
+        return char
 
-    def getHardwareRevision (self):
+    async def getHardwareRevision (self):
         """
         Returns :
             The hardware version as a null terminated utf-8 string.
         """
-        char = self.btdevice.getCharacteristics (uuid=btle.AssignedNumbers.hardwareRevisionString)[0]
-        return char.read ()
+        char = await self.btdevice.read_gatt_char("00002a27-0000-1000-8000-00805f9b34fb")
+        return char
 
-    def getModelNumber (self):
+    async def getModelNumber (self):
         """
         Returns :
             The model as a null terminated utf-8 string.
         """
-        char = self.btdevice.getCharacteristics (uuid=btle.AssignedNumbers.modelNumberString)[0]
-        return char.read ()
+        #char = self.btdevice.getCharacteristics (uuid=btle.AssignedNumbers.modelNumberString)[0]
+        char = await self.btdevice.read_gatt_char("00002a24-0000-1000-8000-00805f9b34fb")
+        return char
 
-    def sendFirmware (self, firmware_path):
+    async def sendFirmware (self, firmware_path):
         """
         Updates the light bulb's firmware. The light will blink green after receiving the new
         firmware.
