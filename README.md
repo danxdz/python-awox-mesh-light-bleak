@@ -13,6 +13,9 @@ https://github.com/fsaris/EspHome-AwoX-BLE-mesh-hub
 
 check out is findle to get your credencials ( mesh_name , mesh_key )
 
+https://jsfiddle.net/fsaris/uncm54vb/37/
+https://jsfiddle.net/cooldan/xfm590e4/
+
 
 ---------------------
 
