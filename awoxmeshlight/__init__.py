@@ -72,12 +72,23 @@ OTA_CHAR_UUID = '00010203-0405-0607-0809-0a0b0c0d1913'
 
 logger = logging.getLogger (__name__)
 
+def notification_handler(characteristic: BleakGATTCharacteristic, data: bytearray):
+    """Simple notification handler which prints the data received."""
+    logger.info("RECEIVED INFO ::: %s: %r", characteristic.description, data)
+
+
+
 class Delegate(BleakClient):
     def __init__(self, light):
         self.light = light
         #btle.DefaultDelegate.__init__(self)
+        #BleakGATTCharacteristic.__init__(self)
+       
+    
+
 
     def handleNotification(self, cHandle, data):
+        print("handleNotification")
         char = self.light.btdevice.getCharacteristics (cHandle)[0]
         if char.uuid == STATUS_CHAR_UUID:
             logger.info ("Notification on status char.")
@@ -87,7 +98,7 @@ class Delegate(BleakClient):
             message = pckt.decrypt_packet (self.light.session_key, self.light.mac, data)
             logger.info ("Received message : %s", repr (message))
             self.light.parseStatusResult(message)
-
+            self.light.message = message
 
 class AwoxMeshLight:
     def __init__ (self, mac, mesh_name = "unpaired", mesh_password = "1234"):
@@ -114,6 +125,7 @@ class AwoxMeshLight:
         self.blue = None
         self.mode = None
         self.status = None
+        self.message = None
 
     async def connect(self, mesh_name = None, mesh_password = None):
         """
@@ -130,24 +142,63 @@ class AwoxMeshLight:
         assert len(self.mesh_name) <= 16, "mesh_name can hold max 16 bytes"
         assert len(self.mesh_password) <= 16, "mesh_password can hold max 16 bytes"
 
-        await self.btdevice.connect ()
-        #self.btdevice.setDelegate (Delegate (self))
+        await self.btdevice.connect (timeout=20.0)
+        
+        
         #pair_char = self.btdevice.get_services (uuid = PAIR_CHAR_UUID)[0]
 
         self.session_random = urandom(8)
+        print("mesh_name: ", self.mesh_name)
+        print("mesh_password: ", self.mesh_password)
+        print("session_random: ", self.session_random)
         message = pckt.make_pair_packet (self.mesh_name, self.mesh_password, self.session_random)
-        await self.btdevice.write_gatt_char(PAIR_CHAR_UUID, message, True)
-
+        print("message: ", message)
+        pair_resp = await self.btdevice.write_gatt_char(PAIR_CHAR_UUID, message, True)
+        print("pair_resp: ", pair_resp)
         status_char = await self.btdevice.read_gatt_char(STATUS_CHAR_UUID)
         #status_char.write (b'\x01')
-        await  self.btdevice.write_gatt_char(STATUS_CHAR_UUID, b'\x01', True)
+        print("status_char: ", status_char)
+        status_resp = await  self.btdevice.write_gatt_char(STATUS_CHAR_UUID, b'\x01', True)
+        print("status_resp: ", status_resp)
 
-        reply = bytearray ( await self.btdevice.read_gatt_char (PAIR_CHAR_UUID))
-        print("reply: ", reply)
+
+        reply = await self.btdevice.read_gatt_char (PAIR_CHAR_UUID)
+        print("reply: ", reply[0])
         if reply[0] == 0xd :
             self.session_key = pckt.make_session_key (self.mesh_name, self.mesh_password, \
                 self.session_random, reply[1:9])
+            logger.info ("Session key : %s", repr (self.session_key))
             logger.info ("Connected.")
+
+            services = self.btdevice.services
+            for service in services:
+                        print(f"[Service] {service.uuid}: (Handle: {service.handle})")
+                        for char in service.characteristics:
+                            print(f"\t[Characteristic] {char.uuid}: ({','.join(char.properties)}) | Name: {char.description}")
+                            if "read" in char.properties:
+                                if (char.uuid == STATUS_CHAR_UUID):
+                                    status_char = char
+                                    print("Reading...\n")
+                                    try:
+                                        value = bytes(await self.btdevice.read_gatt_char(char))
+                                        print("value: ", value)
+                                        tst2 = await self.btdevice.start_notify (char, notification_handler)
+                                        print("tst2: ", tst2)
+                                       
+                                    except Exception as e:
+                                        value = str(e).encode()
+                                    else:
+                                        value = "No Value"
+                                    print(
+                                        f"\t[Characteristic] {char.uuid}: ({','.join(char.properties)}) | Name: {char.description}, Value: {value} ")
+                                    for descriptor in char.descriptors:
+                                        value = await self.btdevice.read_gatt_descriptor(descriptor.handle)
+                                        print(f"\t\t[Descriptor] {descriptor.uuid}: (Handle: {descriptor.handle}) | Value: {bytes(value)} ")
+
+
+            #char = self.light.btdevice.getCharacteristics (cHandle)[0]
+  
+
             return True
         else :
             if reply[0] == 0xe :
@@ -239,6 +290,7 @@ class AwoxMeshLight:
         self.mesh_id = mesh_id
 
     async def writeCommand (self, command, data, dest = None):
+        print("writeCommand")
         """
         Args:
             command: The command, as a number.
@@ -253,16 +305,19 @@ class AwoxMeshLight:
         if not self.command_char:
             #self.command_char = self.btdevice.getCharacteristics (uuid=COMMAND_CHAR_UUID)[0]
             self.command_char = await self.btdevice.read_gatt_char(COMMAND_CHAR_UUID)
+            print("self.command_char: ", self.command_char)
 
         try:
             logger.info ("[%s] Writing command %i data %s", self.mac, command, repr (data))
             #self.command_char.write(packet)
+            print("packet: ", packet)
             await self.btdevice.write_gatt_char(COMMAND_CHAR_UUID, packet, True)
         except:
             logger.info('[%s] (Re)load characteristics', self.mac)
             #self.command_char = self.btdevice.getCharacteristics(uuid=COMMAND_CHAR_UUID)[0]
             self.command_char = await  self.btdevice.read_gatt_char(COMMAND_CHAR_UUID)
             logger.info ("[%s] Writing command %i data %s", self.mac, command, repr (data))
+            print("except packet: ", packet)
             #self.command_char.write(packet)
             await self.btdevice.write_gatt_char(COMMAND_CHAR_UUID, packet, True)
 
@@ -273,11 +328,13 @@ class AwoxMeshLight:
         self.writeCommand (C_MESH_RESET, b'\x00')
 
     def readStatus (self):
+        print("readStatus")
         status_char = self.btdevice.getCharacteristics (uuid = STATUS_CHAR_UUID)[0]
         packet = status_char.read ()
         return pckt.decrypt_packet (self.session_key, self.mac, packet)
 
     def parseStatusResult(self, message):
+        print("parseStatusResult")
         meshid = struct.unpack('B', message[3:4])[0]
         mode = struct.unpack('B', message[12:13])[0]
 
@@ -401,6 +458,8 @@ class AwoxMeshLight:
         #char = self.btdevice.getCharacteristics (uuid=btle.AssignedNumbers.modelNumberString)[0]
         char = await self.btdevice.read_gatt_char("00002a24-0000-1000-8000-00805f9b34fb")
         return char
+
+#**********************************************************
 
     async def sendFirmware (self, firmware_path):
         """

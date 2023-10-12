@@ -10,6 +10,9 @@ LIB_PATH = os.path.abspath(PARENT_PATH)
 sys.path.append(LIB_PATH)
 
 from awoxmeshlight import AwoxMeshLight
+import sys
+
+
 
 import logging
 
@@ -39,12 +42,15 @@ async def main():
     #convertendo para inteiro
     if int(ask) == 0:
         await main()
+    elif ask == "":
+        ask = 0
+        await main()
     else:
         ask = int(ask) - 1
         #await AwoxMeshLight.connect_to_device(devices[ask])
 
 
-    selected_device = str(devices[ask].address)
+    selected_device = devices[ask].address
     print("Selected device address:", selected_device)
     mylight = AwoxMeshLight(selected_device, "F8GwIEDa", "31617080")
 
