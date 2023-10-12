@@ -1,10 +1,20 @@
-Update to use Bleak Lib:
+Updated to use Bleak Lib:
 
  - clone git
  - pip  install pycryptodome 
  - pip install bleak
 
+
+Thanks to:
+fsaris:
+https://github.com/fsaris/EspHome-AwoX-BLE-mesh-hub
+
+check out is findle to get your credencials ( mesh_name , mesh_key )
+
+
 ---------------------
+
+
 
 Python package to control Awox mesh light bulbs.
 
